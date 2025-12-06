@@ -1,0 +1,37 @@
+3|tuyen|q|alo
+3|tuyen|q|.
+3|q|tuyen|1
+3|q|tuyen|2
+3|qq|q|alo
+4|q|AI|a
+4|q|AI|B
+3|q|qq|?
+3|q|tuyen|?
+3|tuyen|q|gì cơ
+3|tuyen|q|không sao
+3|tuyen|q|1
+3|tuyen|q|1
+3|tuyen|q|1
+3|tuyen|q|1
+3|tuyen|q|1
+3|tuyen|q|1
+3|tuyen|q|1
+3|tuyen|q|1
+3|tuyen|q|1
+3|tuyen|q|1
+3|tuyen|q|1
+3|tuyen|q|1
+3|tuyen|q|1
+3|tuyen|q|1
+3|tuyen|q|1
+3|tuyen|q|1
+3|tuyen|q|1
+3|tuyen|q|1
+3|tuyen|q|1
+3|tuyen|q|1
+3|tuyen|q|1
+3|tuyen|q|1
+3|tuyen|q|1
+3|q|tuyen|alo
+3|q|tuyen|1
+3|tuyen|q|1
