@@ -35,7 +35,14 @@ enum MessageType {
     
     MSG_LEAVE_GROUP,        // 16
     MSG_UNFRIEND,           // 17
-    MSG_REMOVE_CONTACT      // 18
+    MSG_REMOVE_CONTACT,
+    // --- TÍNH NĂNG GỬI FILE ---
+    MSG_FILE_START,     // Báo server: "Tôi bắt đầu gửi file này, kích thước này"
+    MSG_FILE_DATA,     // Chứa dữ liệu file (Binary chunk)
+    MSG_FILE_END,     // Báo server: "Đã gửi xong"
+    MSG_FILE_NOTIFY,
+    // --- TÍNH NĂNG TẢI FILE (DOWNLOAD) ---
+    MSG_FILE_DOWNLOAD_REQ = 22  // Client gửi: "Server ơi, gửi cho tôi file này đi"     // Server báo người nhận: "Có file mới gửi đến bạn"      // 18
 };
 
 // --- QUAN TRỌNG: BẮT BUỘC DÙNG #pragma pack(1) ---

@@ -176,6 +176,10 @@ DWORD WINAPI handle_client(LPVOID param) {
     Message msg;
     bool is_logged_in = false;
     string my_name = "";
+
+    // BIẾN ĐỂ XỬ LÝ NHẬN FILE
+    ofstream *current_file = NULL;
+    string current_filename = "";
     
     while (true) {
 
@@ -428,6 +432,129 @@ DWORD WINAPI handle_client(LPVOID param) {
             LeaveCriticalSection(&data_cs);
             
             cout << "[UNFRIEND] " << my_name << " - " << friend_name << endl;
+        }
+
+        // 11. BẮT ĐẦU NHẬN FILE
+        if (msg.type == MSG_FILE_START) {
+            string fname(msg.data); // Tên file nằm trong biến data
+            string sender(msg.name);
+            
+            // Tạo tên file duy nhất: Files/timestamp_filename
+            // (Đơn giản hóa: Lưu thẳng tên file, cẩn thận trùng)
+            string save_path = "Server/Data/Files/" + fname;
+            
+            current_file = new ofstream(save_path.c_str(), ios::binary);
+            current_filename = fname;
+            
+            cout << "[FILE START] " << sender << " gui file: " << fname << endl;
+        }
+        
+        // 12. NHẬN DỮ LIỆU FILE (BINARY)
+        else if (msg.type == MSG_FILE_DATA) {
+            if (current_file && current_file->is_open()) {
+                // Đọc độ dài chunk từ trường password
+                int chunk_len = atoi(msg.password); 
+                if (chunk_len > 0 && chunk_len <= 1024) {
+                    current_file->write(msg.data, chunk_len);
+                }
+            }
+        }
+        
+        // 13. KẾT THÚC FILE -> THÔNG BÁO CHO NGƯỜI NHẬN
+        else if (msg.type == MSG_FILE_END) {
+            if (current_file) {
+                current_file->close();
+                delete current_file;
+                current_file = NULL;
+            }
+            
+            string sender(msg.name);
+            string target(msg.target); // Người nhận hoặc Nhóm
+            
+            cout << "[FILE END] Da luu file tu " << sender << endl;
+            
+            // --- THÔNG BÁO CHO NGƯỜI NHẬN ---
+            // Tạo thông báo: "[FILE] sender da gui file: filename"
+            Message notify;
+            notify.type = MSG_FILE_NOTIFY;
+            strcpy(notify.name, sender.c_str());
+            strcpy(notify.target, target.c_str());
+            strcpy(notify.data, current_filename.c_str()); // Tên file
+            
+            // Logic gửi thông báo (tương tự chat)
+            // Nếu là Private
+            EnterCriticalSection(&data_cs);
+            if (online_users.find(target) != online_users.end()) {
+                send(online_users[target], (char*)&notify, sizeof(Message), 0);
+            }
+            // Nếu là Group (cần duyệt danh sách mem)
+            else if (groups.find(target) != groups.end()) {
+                 vector<SOCKET>& mems = groups[target].members;
+                 for (size_t i = 0; i < mems.size(); ++i) {
+                     if (mems[i] != client_socket) {
+                         send(mems[i], (char*)&notify, sizeof(Message), 0);
+                     }
+                 }
+            }
+            LeaveCriticalSection(&data_cs);
+            
+            // Lưu lịch sử chat dạng văn bản để load lại sau
+            string history_content = "[FILE] " + current_filename;
+            int type_save = (groups.find(target) != groups.end()) ? MSG_GROUP_CHAT : MSG_PRIVATE_CHAT;
+            save_message(sender, target, history_content, type_save);
+        }
+
+        // 14. XỬ LÝ YÊU CẦU TẢI FILE TỪ CLIENT
+        else if (msg.type == MSG_FILE_DOWNLOAD_REQ) {
+            string filename(msg.data); // Tên file client muốn tải
+            string filepath = "Server/Data/Files/" + filename;
+            
+            cout << "[DOWNLOAD] Client " << my_name << " yeu cau tai file: " << filename << endl;
+
+            ifstream infile(filepath.c_str(), ios::binary | ios::ate); // Mở chế độ Binary + Đặt con trỏ ở cuối để lấy size
+            
+            if (infile.is_open()) {
+                // 1. Lấy kích thước file
+                int filesize = infile.tellg(); 
+                infile.seekg(0, ios::beg); // Quay về đầu file
+
+                // 2. Gửi gói START (Server -> Client)
+                // Password chứa filesize, Data chứa tên file
+                Message start_msg;
+                start_msg.type = MSG_FILE_START; 
+                sprintf(start_msg.password, "%d", filesize);
+                strcpy(start_msg.data, filename.c_str());
+                send(client_socket, (char*)&start_msg, sizeof(Message), 0);
+                Sleep(10); // Nghỉ xíu
+
+                // 3. Gửi nội dung file (DATA)
+                char buffer[1024];
+                while (!infile.eof()) {
+                    infile.read(buffer, 1024);
+                    int bytes_read = infile.gcount(); // Số byte thực tế đọc được
+                    
+                    if (bytes_read > 0) {
+                        Message data_msg;
+                        data_msg.type = MSG_FILE_DATA;
+                        sprintf(data_msg.password, "%d", bytes_read); // Gửi độ dài chunk
+                        memcpy(data_msg.data, buffer, bytes_read);    // Copy binary an toàn
+                        
+                        send(client_socket, (char*)&data_msg, sizeof(Message), 0);
+                        Sleep(5); // Nghỉ để tránh dính gói tin
+                    }
+                }
+                infile.close();
+
+                // 4. Gửi gói END
+                Message end_msg;
+                end_msg.type = MSG_FILE_END;
+                strcpy(end_msg.data, filename.c_str());
+                send(client_socket, (char*)&end_msg, sizeof(Message), 0);
+                
+                cout << "[DOWNLOAD] Da gui xong file cho " << my_name << endl;
+            } else {
+                cout << "[ERROR] Khong tim thay file: " << filepath << endl;
+            }
         }
     }
 

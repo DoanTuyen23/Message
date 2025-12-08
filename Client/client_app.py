@@ -5,6 +5,10 @@ import struct
 import tkinter as tk
 from tkinter import messagebox, simpledialog
 from datetime import datetime
+from tkinter import filedialog # <-- Thêm dòng này
+import os # <-- Thêm dòng này để lấy tên file
+import subprocess # Để mở file trên Windows an toàn
+import sys
 
 # --- CẤU HÌNH ---
 SERVER_IP = '127.0.0.1'
@@ -32,6 +36,12 @@ MSG_RESP_MEMBER_LIST  = 14
 MSG_LEAVE_GROUP       = 15
 MSG_UNFRIEND          = 16
 MSG_REMOVE_CONTACT    = 17  # Server báo Client xóa nút khỏi Sidebar
+
+MSG_FILE_START        = 18  # Bắt đầu gửi file
+MSG_FILE_DATA         = 19  # Dữ liệu file
+MSG_FILE_END          = 20  # Kết thúc gửi file
+MSG_FILE_NOTIFY       = 21  # Thông báo đã gửi file
+MSG_FILE_DOWNLOAD_REQ = 22  # Yêu cầu tải file
 
 class ContactButton(ctk.CTkButton):
     # Thêm tham số on_right_click vào cuối
@@ -125,9 +135,19 @@ class ChatClient(ctk.CTk):
 
         self.input_frame = ctk.CTkFrame(self.right_frame, height=50)
         self.input_frame.pack(fill="x", padx=5, pady=5)
+
+        # --- NÚT GỬI FILE (BÊN TRÁI) ---
+        self.btn_file = ctk.CTkButton(self.input_frame, text="+", width=35, fg_color="#444", command=self.choose_file)
+        self.btn_file.pack(side="left", padx=5)
+
         self.entry_msg = ctk.CTkEntry(self.input_frame, placeholder_text="Nhập tin nhắn...")
         self.entry_msg.pack(side="left", fill="x", expand=True, padx=5)
         self.entry_msg.bind("<Return>", self.send_msg)
+        
+        # Biến hỗ trợ tải file
+        self.downloading_file = None # Biến giữ file đang tải về
+        self.downloading_path = ""   # Đường dẫn lưu file
+
         ctk.CTkButton(self.input_frame, text="Gửi", width=60, command=self.send_msg).pack(side="right", padx=5)
 
     def pack(self, type, name="", pwd="", target="", gpwd="", data=""):
@@ -166,6 +186,70 @@ class ChatClient(ctk.CTk):
                     data = struct.unpack(PACK_FORMAT, packet)
                     self.after(0, self.handle_packet, data)
             except: break
+
+    # --- HÀM GỬI FILE MỚI ---  
+    def choose_file(self):
+        if not self.current_target:
+            messagebox.showwarning("Chú ý", "Hãy chọn người nhận trước!")
+            return
+
+        # Mở hộp thoại chọn file
+        filepath = filedialog.askopenfilename()
+        if filepath:
+            # Chạy thread gửi file để không lag giao diện
+            threading.Thread(target=self.sending_file_thread, args=(filepath,)).start()
+
+    # Hàm gửi file trong thread riêng
+    def sending_file_thread(self, filepath):
+        try:
+            filename = os.path.basename(filepath)
+            filesize = os.path.getsize(filepath)
+            
+            # Hiển thị tin nhắn giả (Bubble) phía mình trước
+            self.after(0, self.render_bubble, self.my_name, f"[FILE] Đang gửi: {filename}...", True, False)
+
+            # 1. Gửi gói START: name=sender, target=receiver, data=filename
+            # Dùng trường password để gửi kích thước file (hack trick)
+            self.client.send(self.pack(MSG_FILE_START, self.my_name, str(filesize), self.current_target, "", filename))
+            
+            # 2. Đọc file và gửi từng chunk (Binary)
+            with open(filepath, "rb") as f:
+                while True:
+                    chunk = f.read(1024) # Đọc 1024 bytes (khớp BUFF_SIZE bên C++)
+                    if not chunk: break
+                    
+                    # Gói tin DATA: Cần pack cẩn thận vì chunk là bytes, không phải string
+                    # data=chunk
+                    # password=độ dài chunk (Vì chunk cuối có thể < 1024 bytes)
+                    
+                    # Lưu ý: struct.pack cần đúng độ dài 1024s. Ta phải đệm (padding) nếu thiếu.
+                    chunk_len = len(chunk)
+                    padded_chunk = chunk.ljust(1024, b'\0') 
+                    
+                    # Tự pack tay gói tin MSG_FILE_DATA để đảm bảo binary không bị lỗi decode
+                    # Format: i 32s 32s 32s 32s 1024s
+                    pkt = struct.pack(PACK_FORMAT, 
+                                      MSG_FILE_DATA, 
+                                      self.my_name.encode(), 
+                                      str(chunk_len).encode(), # Gửi độ dài thật qua password
+                                      self.current_target.encode(), 
+                                      b"", 
+                                      padded_chunk)
+                    self.client.send(pkt)
+                    
+                    # Nghỉ cực ngắn để Server kịp xử lý (tránh dính gói tin)
+                    import time
+                    time.sleep(0.005) 
+
+            # 3. Gửi gói END
+            self.client.send(self.pack(MSG_FILE_END, self.my_name, "", self.current_target))
+            
+            self.after(0, self.render_bubble, self.my_name, f"[FILE] Đã gửi: {filename}", True, False)
+            self.after(0, self.scroll_to_bottom)
+            
+        except Exception as e:
+            print(f"Lỗi gửi file: {e}")
+            messagebox.showerror("Lỗi", "Không thể gửi file!")
 
     def handle_packet(self, data):
         """Xử lý logic khi nhận được gói tin"""
@@ -238,6 +322,87 @@ class ChatClient(ctk.CTk):
                 self.btn_members.pack_forget() # Ẩn nút thành viên
                 for w in self.scroll_chat.winfo_children(): w.destroy()
                 messagebox.showinfo("Thông báo", f"Đã xóa liên hệ {target_name}")
+
+        elif m_type == MSG_FILE_NOTIFY:
+            # content chính là tên file (VD: baitap.docx)
+            display_text = f"FILE: {content}"
+            
+            # 1. Xác định đoạn chat (Private hay Group)
+            chat_key = ""
+            if target == self.my_name: # Chat riêng (Người khác gửi cho mình)
+                chat_key = sender
+                mode = "PRIVATE"
+            else: # Chat nhóm (Người khác gửi vào nhóm)
+                chat_key = target
+                mode = "GROUP"
+                
+            # 2. Lưu tin nhắn vào RAM 
+            # QUAN TRỌNG: Lưu thêm cờ 'is_file' và 'filename' để phục vụ việc tải sau này
+            if chat_key not in self.messages: self.messages[chat_key] = []
+            
+            self.messages[chat_key].append({
+                'sender': sender, 
+                'content': display_text, 
+                'is_sys': False,
+                'is_file': True,      # Đánh dấu đây là tin nhắn chứa file
+                'filename': content   # Lưu tên file gốc (quan trọng để gửi yêu cầu tải)
+            })
+            
+            # 3. Tạo nút trên Sidebar nếu chưa có (Trường hợp người lạ gửi file)
+            if chat_key not in self.contacts:
+                self.add_contact_btn(chat_key, mode)
+                
+            # 4. Cập nhật giao diện
+            if self.current_target == chat_key:
+                # Gọi hàm render_bubble với tham số is_file=True để vẽ nút Download màu xanh
+                # Lưu ý: sender == self.my_name là False (vì đây là file người khác gửi đến)
+                self.render_bubble(sender, display_text, False, False, is_file=True, filename=content)
+                
+                # Cuộn xuống dưới cùng để thấy file mới
+                self.after(50, self.scroll_to_bottom)
+            else:
+                # Nếu đang không mở cuộc trò chuyện này thì báo đỏ (unread)
+                if chat_key in self.contacts: self.contacts[chat_key].set_unread(True)
+        
+        # 1. SERVER BẮT ĐẦU GỬI FILE VỀ
+        elif m_type == MSG_FILE_START:
+            # Server xác nhận bắt đầu gửi. 
+            # (Thực ra mình đã mở file ở hàm request_download rồi, nên ở đây ko cần làm gì nhiều)
+            print(f"[DOWNLOAD] Bat dau nhan file size={sender} bytes") # sender chứa filesize do server gửi
+
+        # 2. NHẬN DỮ LIỆU FILE
+        elif m_type == MSG_FILE_DATA:
+            if self.downloading_file:
+                try:
+                    # Lấy độ dài chunk từ password (data[2])
+                    # Lưu ý: partition(b'\0')[0] để cắt bỏ ký tự null thừa
+                    chunk_len_str = data[2].partition(b'\0')[0].decode('utf-8', errors='replace')
+                    
+                    if chunk_len_str.isdigit():
+                        chunk_len = int(chunk_len_str)
+                        
+                        # data[5] là dữ liệu binary (bytes)
+                        # Cắt đúng độ dài thực tế để loại bỏ padding
+                        chunk_data = data[5][:chunk_len]
+                        
+                        self.downloading_file.write(chunk_data)
+                except Exception as e:
+                    print(f"Lỗi ghi file: {e}")
+
+        # 3. KẾT THÚC TẢI
+        elif m_type == MSG_FILE_END:
+            if self.downloading_file:
+                self.downloading_file.close()
+                self.downloading_file = None
+                
+                ans = messagebox.askyesno("Tải xong", "Đã tải xong file. Bạn có muốn mở ngay không?")
+                if ans:
+                    try:
+                        # Mở file trên Windows
+                        os.startfile(self.downloading_path)
+                    except:
+                        # Fallback cho các OS khác (nếu cần)
+                        subprocess.call(['open', self.downloading_path])
 
     def process_chat_msg(self, type, sender, target, content, raw_data):
         chat_key = ""
@@ -353,8 +518,9 @@ class ChatClient(ctk.CTk):
         # Đợi 50ms để giao diện vẽ xong tin nhắn rồi mới cuộn
         self.after(50, self.scroll_to_bottom)
 
-    def render_bubble(self, sender, content, is_me, is_sys):
+    def render_bubble(self, sender, content, is_me, is_sys, is_file=False, filename=""):
         frame = ctk.CTkFrame(self.scroll_chat, fg_color="transparent")
+        
         if is_sys:
             frame.pack(fill="x", pady=5)
             ctk.CTkLabel(frame, text=content, font=("Arial", 11, "italic"), text_color="gray").pack()
@@ -364,7 +530,18 @@ class ChatClient(ctk.CTk):
         else:
             frame.pack(fill="x", pady=5, anchor="w")
             ctk.CTkLabel(frame, text=sender, font=("Arial", 9), text_color="gray").pack(anchor="w", padx=5)
-            ctk.CTkLabel(frame, text=content, fg_color="#333", text_color="white", corner_radius=15, padx=10, pady=5).pack(side="left")
+            
+            # Bây giờ biến is_file đã được định nghĩa, code này sẽ chạy đúng
+            if is_file:
+                # NẾU LÀ FILE: Vẽ nút Tải về
+                btn = ctk.CTkButton(frame, text=f"⬇ {content}", 
+                                    fg_color="#2ecc71", hover_color="#27ae60",
+                                    width=150,
+                                    command=lambda: self.request_download(filename))
+                btn.pack(side="left")
+            else:
+                # Tin nhắn thường
+                ctk.CTkLabel(frame, text=content, fg_color="#333", text_color="white", corner_radius=15, padx=10, pady=5).pack(side="left")
 
     def req_friend(self):
         t = self.entry_add.get().strip()
@@ -405,6 +582,25 @@ class ChatClient(ctk.CTk):
         # _parent_canvas là thành phần nội bộ của CTkScrollableFrame
         # yview_moveto(1.0) nghĩa là cuộn đến vị trí 100% (đáy)
         self.scroll_chat._parent_canvas.yview_moveto(1.0)
+
+    # --- HÀM YÊU CẦU TẢI FILE MỚI ---
+    def request_download(self, filename):
+        # 1. Hỏi người dùng muốn lưu vào đâu
+        save_path = filedialog.asksaveasfilename(initialfile=filename, title="Lưu file")
+        
+        if save_path:
+            self.downloading_path = save_path
+            
+            # Mở file sẵn để chờ ghi dữ liệu
+            try:
+                self.downloading_file = open(save_path, "wb")
+                
+                # 2. Gửi yêu cầu lên Server (Type 22)
+                self.client.send(self.pack(MSG_FILE_DOWNLOAD_REQ, self.my_name, "", "", "", filename))
+                
+                messagebox.showinfo("Bắt đầu tải", f"Đang tải {filename}...")
+            except Exception as e:
+                messagebox.showerror("Lỗi", f"Không thể tạo file: {e}")
 
 if __name__ == "__main__":
     app = ChatClient()

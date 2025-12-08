@@ -35,3 +35,15 @@
 3|q|tuyen|alo
 3|q|tuyen|1
 3|tuyen|q|1
+3|tuyen|q|alo
+4|tuyen|AI|alo
+4|tuyen|AI|?
+3|tuyen|q|?
+3|tuyen|q|.
+3|tuyen|q|.
+3|q|tuyen|.
+3|q|tuyen|lo
+3|q|tuyen|[FILE] Untitled document.txt
+3|tuyen|q|.
+3|tuyen|q|?
+3|q|tuyen|[FILE] Untitled document (1).txt
