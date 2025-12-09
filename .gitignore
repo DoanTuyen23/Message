@@ -1,2 +1,23 @@
-/client.exe
-/server.exe
+# --- C++ ---
+*.exe
+*.o
+*.obj
+*.dll
+
+# --- Python ---
+__pycache__/
+*.pyc
+
+# --- Dữ liệu (Server/Data) ---
+# Chặn tất cả trong folder Data
+Server/Data/
+# Hoặc nếu muốn chặn file cụ thể:
+# friends.txt
+# history.txt
+# groups.txt
+
+# --- File tạm/Hệ thống ---
+*.tmp
+.DS_Store
+.vscode/
+.idea/
