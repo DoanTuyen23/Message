@@ -96,3 +96,9 @@
 4|q|CNTT|sao
 3|tuyen|q|không ku
 3|q|tuyen|ừ
+4|q|CNTT|alo
+4|q|CNTT|?
+4|q|CNTT|[FILE] 1765379747_sniffers_report.docx
+4|q|CNTT|[FILE] 1765379800_MAX7219.PDF
+3|q|tuyen|[FILE] 1765380165_MAX7219.PDF
+3|q|tuyen|alo

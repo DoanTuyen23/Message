@@ -594,6 +594,25 @@ DWORD WINAPI handle_client(LPVOID param) {
                 cout << "[ERROR] Khong tim thay file: " << filepath << endl;
             }
         }
+
+        // 15. XỬ LÝ GAME CARO (Relay - Chuyển tiếp y hệt chat riêng)
+        else if (msg.type == MSG_GAME_REQ || msg.type == MSG_GAME_ACCEPT || 
+                 msg.type == MSG_GAME_MOVE || msg.type == MSG_GAME_END) {
+            
+            string sender(msg.name);
+            string target(msg.target);
+            
+            EnterCriticalSection(&data_cs);
+            // Nếu người nhận đang online thì chuyển gói tin sang
+            if (online_users.find(target) != online_users.end()) {
+                // Đảm bảo gói tin giữ nguyên người gửi
+                strcpy(msg.name, sender.c_str()); 
+                send(online_users[target], (char*)&msg, sizeof(Message), 0);
+            }
+            LeaveCriticalSection(&data_cs);
+            
+            cout << "[GAME] " << sender << " -> " << target << " (Type: " << msg.type << ")" << endl;
+        }
     }
 
     if (is_logged_in) {

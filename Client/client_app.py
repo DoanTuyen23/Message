@@ -42,7 +42,12 @@ MSG_FILE_DATA         = 19  # Dữ liệu file
 MSG_FILE_END          = 20  # Kết thúc gửi file
 MSG_FILE_NOTIFY       = 21  # Thông báo đã gửi file
 MSG_FILE_DOWNLOAD_REQ = 22  # Yêu cầu tải file
+MSG_GAME_REQ          = 23  # Yêu cầu chơi game
+MSG_GAME_ACCEPT       = 24  # Chấp nhận chơi game
+MSG_GAME_MOVE         = 25  # Di chuyển trong game
+MSG_GAME_END          = 26  # Kết thúc game
 
+# --- LỚP GIAO DIỆN ---
 class ContactButton(ctk.CTkButton):
     # Thêm tham số on_right_click vào cuối
     def __init__(self, master, real_name, display_text, type, callback, on_right_click):
@@ -63,6 +68,157 @@ class ContactButton(ctk.CTkButton):
         if active: self.configure(fg_color="#2980B9") 
         else: self.configure(fg_color="transparent")
 
+# --- LỚP BÀN CỜ CARO ---
+class CaroBoard(ctk.CTkToplevel):
+    def __init__(self, master, enemy_name, my_turn, symbol, on_move_callback):
+        super().__init__(master)
+        self.title(f"Caro: Bạn vs {enemy_name}")
+        
+        # --- CẤU HÌNH KÍCH THƯỚC ---
+        w_child = 600  # Chiều rộng cửa sổ game
+        h_child = 650  # Chiều cao cửa sổ game
+
+        # --- TÍNH TOÁN VỊ TRÍ CĂN GIỮA ---
+        # 1. Lấy thông tin vị trí và kích thước của cửa sổ cha (Ứng dụng chính)
+        # master ở đây chính là self (của ChatClient) được truyền vào
+        x_parent = master.winfo_x()
+        y_parent = master.winfo_y()
+        w_parent = master.winfo_width()
+        h_parent = master.winfo_height()
+
+        # 2. Tính toán tọa độ (x, y) mới để tâm trùng nhau
+        # Công thức: Vị trí cha + (Rộng cha - Rộng con) / 2
+        new_x = int(x_parent + (w_parent - w_child) / 2)
+        new_y = int(y_parent + (h_parent - h_child) / 2)
+
+        # 3. Thiết lập hình học: Rộng x Cao + Tọa độ X + Tọa độ Y
+        self.geometry(f"{w_child}x{h_child}+{new_x}+{new_y}")
+        
+        self.resizable(False, False)
+        
+        self.enemy_name = enemy_name
+        self.my_turn = my_turn
+        self.my_symbol = symbol # "X" hoặc "O"
+        self.enemy_symbol = "O" if symbol == "X" else "X"
+        self.on_move_callback = on_move_callback
+        
+        self.BOARD_SIZE = 15
+        self.CELL_SIZE = 35
+        self.board_data = {} # Lưu nước đi: key="row_col", value="X"/"O"
+        self.game_over = False
+
+        # Status Label
+        status_text = "Lượt của BẠN" if my_turn else f"Lượt của {enemy_name}"
+        color = "green" if my_turn else "red"
+        self.lbl_status = ctk.CTkLabel(self, text=status_text, font=("Arial", 18, "bold"), text_color=color)
+        self.lbl_status.pack(pady=10)
+
+        # Canvas bàn cờ
+        canvas_size = self.BOARD_SIZE * self.CELL_SIZE
+        self.canvas = tk.Canvas(self, width=canvas_size, height=canvas_size, bg="#F0D9B5", highlightthickness=0)
+        self.canvas.pack()
+        self.canvas.bind("<Button-1>", self.on_click)
+
+        self.draw_grid()
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+        
+        # Focus ngay vào cửa sổ này để người dùng nhận biết
+        self.lift()
+        self.focus_force()
+
+    def draw_grid(self):
+        for i in range(self.BOARD_SIZE):
+            # Vẽ kẻ ngang
+            self.canvas.create_line(0, i*self.CELL_SIZE, self.BOARD_SIZE*self.CELL_SIZE, i*self.CELL_SIZE)
+            # Vẽ kẻ dọc
+            self.canvas.create_line(i*self.CELL_SIZE, 0, i*self.CELL_SIZE, self.BOARD_SIZE*self.CELL_SIZE)
+
+    def on_click(self, event):
+        if self.game_over or not self.my_turn: return
+
+        # Tính toán tọa độ lưới
+        col = event.x // self.CELL_SIZE
+        row = event.y // self.CELL_SIZE
+        
+        if 0 <= col < self.BOARD_SIZE and 0 <= row < self.BOARD_SIZE:
+            key = f"{row}_{col}"
+            if key not in self.board_data:
+                # 1. Vẽ nước đi của mình
+                self.draw_symbol(row, col, self.my_symbol)
+                self.board_data[key] = self.my_symbol
+                
+                # 2. Kiểm tra thắng
+                if self.check_win(row, col, self.my_symbol):
+                    self.game_over = True
+                    self.lbl_status.configure(text="BẠN THẮNG! 🏆", text_color="gold")
+                    messagebox.showinfo("Kết quả", "Chúc mừng! Bạn đã thắng.")
+                else:
+                    self.set_turn(False)
+                
+                # 3. Gửi nước đi cho Server
+                self.on_move_callback(row, col, self.game_over)
+
+    def opponent_move(self, row, col):
+        """Xử lý khi đối thủ đi"""
+        key = f"{row}_{col}"
+        if key not in self.board_data:
+            self.draw_symbol(row, col, self.enemy_symbol)
+            self.board_data[key] = self.enemy_symbol
+            
+            # Kiểm tra xem nó có thắng mình không (Check hộ luôn cho chắc)
+            if self.check_win(row, col, self.enemy_symbol):
+                self.game_over = True
+                self.lbl_status.configure(text="BẠN THUA RỒI! 💀", text_color="red")
+                messagebox.showinfo("Kết quả", "Bạn đã thua!")
+            else:
+                self.set_turn(True)
+
+    def draw_symbol(self, row, col, symbol):
+        x = col * self.CELL_SIZE + self.CELL_SIZE // 2
+        y = row * self.CELL_SIZE + self.CELL_SIZE // 2
+        r = self.CELL_SIZE // 2 - 4
+        
+        color = "red" if symbol == "X" else "blue"
+        if symbol == "X":
+            self.canvas.create_line(x-r, y-r, x+r, y+r, width=3, fill=color)
+            self.canvas.create_line(x+r, y-r, x-r, y+r, width=3, fill=color)
+        else:
+            self.canvas.create_oval(x-r, y-r, x+r, y+r, width=3, outline=color)
+
+    def set_turn(self, is_my_turn):
+        self.my_turn = is_my_turn
+        if is_my_turn:
+            self.lbl_status.configure(text="Lượt của BẠN", text_color="green")
+        else:
+            self.lbl_status.configure(text=f"Đợi {self.enemy_name}...", text_color="gray")
+
+    def check_win(self, row, col, symbol):
+        # 4 Hướng: Ngang, Dọc, Chéo chính, Chéo phụ
+        directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
+        for dr, dc in directions:
+            count = 1
+            # Duyệt xuôi
+            for i in range(1, 5):
+                r, c = row + dr*i, col + dc*i
+                if self.board_data.get(f"{r}_{c}") == symbol: count += 1
+                else: break
+            # Duyệt ngược
+            for i in range(1, 5):
+                r, c = row - dr*i, col - dc*i
+                if self.board_data.get(f"{r}_{c}") == symbol: count += 1
+                else: break
+            
+            if count >= 5: return True
+        return False
+
+    def on_close(self):
+        if not self.game_over:
+            if messagebox.askyesno("Thoát", "Đang chơi mà thoát là thua đó nha?"):
+                self.destroy()
+        else:
+            self.destroy()
+
+# --- LỚP ỨNG DỤNG CHÍNH ---
 class ChatClient(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -78,6 +234,9 @@ class ChatClient(ctk.CTk):
 
         self.BATCH_SIZE = 20 # Chỉ hiện 20 tin mỗi lần load
         self.current_display_count = 0 # Đếm xem đang hiện bao nhiêu tin
+        
+        # Biến hỗ trợ chơi game
+        self.game_window = None
         
         self.init_ui()
 
@@ -142,6 +301,10 @@ class ChatClient(ctk.CTk):
         # --- NÚT GỬI FILE (BÊN TRÁI) ---
         self.btn_file = ctk.CTkButton(self.input_frame, text="+", width=35, fg_color="#444", command=self.choose_file)
         self.btn_file.pack(side="left", padx=5)
+        
+        # --- NÚT CHƠI GAME (BÊN TRÁI) ---
+        self.btn_game = ctk.CTkButton(self.input_frame, text="🎮", width=35, fg_color="#8e44ad", command=self.req_game)
+        self.btn_game.pack(side="left", padx=5)
 
         self.entry_msg = ctk.CTkEntry(self.input_frame, placeholder_text="Nhập tin nhắn...")
         self.entry_msg.pack(side="left", fill="x", expand=True, padx=5)
@@ -426,12 +589,54 @@ class ChatClient(ctk.CTk):
                     except:
                         # Fallback cho các OS khác (nếu cần)
                         subprocess.call(['open', self.downloading_path])
+        # 4. GAME: NHẬN LỜI MỜI
+        elif m_type == MSG_GAME_REQ:
+            ans = messagebox.askyesno("Thách đấu", f"{sender} muốn chơi Caro với bạn. Chiến không?")
+            if ans:
+                # Đồng ý -> Gửi gói ACCEPT -> Mình đi sau (O)
+                self.client.send(self.pack(MSG_GAME_ACCEPT, self.my_name, "", sender))
+                # Mình (người nhận lời mời) sẽ là O, đi sau
+                self.after(0, lambda: self.start_game(sender, False, "O"))
+                self.current_target = sender # Chuyển tab chat sang đối thủ luôn
+
+        # 5. GAME: ĐỐI PHƯƠNG ĐỒNG Ý
+        elif m_type == MSG_GAME_ACCEPT:
+           # Mình (người mời) sẽ là X, đi trước
+            messagebox.showinfo("Vào game", f"{sender} đã đồng ý! Bạn (X) đi trước.")
+            self.after(0, lambda: self.start_game(sender, True, "X"))
+
+        # 6. GAME: NHẬN NƯỚC ĐI
+        elif m_type == MSG_GAME_MOVE:
+            # content chứa "row,col"
+            try:
+                r_str, c_str = content.split(',')
+                row, col = int(r_str), int(c_str)
+
+                if self.game_window:
+                    self.game_window.opponent_move(row, col)
+
+                    # Kiểm tra xem họ có báo WIN không (trong trường password - data[2])
+                    raw_flags = data[2].partition(b'\0')[0].decode('utf-8', errors='replace')
+                    if "WIN" in raw_flags:
+                        self.game_window.lbl_status.configure(text="BẠN THUA RỒI! 💀", text_color="red")
+                        self.game_window.game_over = True
+                        messagebox.showinfo("Kết quả", "Đối thủ đã thắng!")
+            except: pass
+
+        
 
     def process_chat_msg(self, type, sender, target, content, raw_data):
+        # --- FIX LỖI NHẬN 2 TIN NHẮN FILE ---
+        # Nếu đây là tin nhắn chat trực tiếp (Type 3 hoặc 4) VÀ nội dung là File
+        # Thì BỎ QUA ngay, vì MSG_FILE_NOTIFY (Type 21) đã lo việc hiển thị rồi.
+        # Chúng ta chỉ xử lý tin nhắn [FILE] khi nó là Lịch sử (MSG_HISTORY).
+        if type in [MSG_PRIVATE_CHAT, MSG_GROUP_CHAT] and content.startswith("[FILE] "):
+            return 
+
         chat_key = ""
         is_history = (type == MSG_HISTORY)
         
-        # --- LOGIC XÁC ĐỊNH NGƯỜI CHAT (Giữ nguyên) ---
+        # --- LOGIC XÁC ĐỊNH NGƯỜI CHAT ---
         if is_history:
             # Decode password để lấy type gốc
             raw_pass_cleaned = raw_data[2].partition(b'\0')[0].decode('utf-8', errors='replace')
@@ -451,15 +656,13 @@ class ChatClient(ctk.CTk):
                 chat_key = target
                 mode = "GROUP"
 
-        # --- LOGIC MỚI: PHÁT HIỆN FILE TỪ LỊCH SỬ ---
+        # --- PHÁT HIỆN FILE TỪ LỊCH SỬ ---
         is_file_msg = False
         filename = ""
         
-        # Server C++ lưu file dưới dạng: "[FILE] ten_file.ext"
-        # Nên ta kiểm tra xem content có bắt đầu bằng chuỗi đó không
+        # Server lưu file dưới dạng: "[FILE] ten_file.ext"
         if content.startswith("[FILE] "):
             is_file_msg = True
-            # Cắt bỏ chữ "[FILE] " (7 ký tự đầu) để lấy tên file sạch
             filename = content[7:] 
         
         # --- LƯU VÀO RAM ---
@@ -772,6 +975,32 @@ class ChatClient(ctk.CTk):
                 messagebox.showinfo("Bắt đầu tải", f"Đang tải {filename}...")
             except Exception as e:
                 messagebox.showerror("Lỗi", f"Không thể tạo file: {e}")
+
+    def req_game(self):
+        """Gửi lời mời chơi game"""
+        if not self.current_target: return
+        # Chỉ cho chơi Private
+        if self.contacts[self.current_target].type == "GROUP":
+            messagebox.showwarning("Lỗi", "Chỉ chơi Caro 1 vs 1 thôi!")
+            return
+
+        self.client.send(self.pack(MSG_GAME_REQ, self.my_name, "", self.current_target))
+        messagebox.showinfo("Game", "Đã gửi lời mời, đợi họ đồng ý nhé!")
+
+    def send_game_move(self, row, col, is_win):
+        """Callback khi mình đánh 1 nước"""
+        # Gửi tọa độ dạng "row,col"
+        content = f"{row},{col}"
+        # Nếu thắng thì gửi cờ báo hiệu (Hack nhẹ: dùng trường password để gửi cờ thắng)
+        flags = "WIN" if is_win else ""
+        self.client.send(self.pack(MSG_GAME_MOVE, self.my_name, flags, self.current_target, "", content))
+
+    def start_game(self, opponent, my_turn, symbol):
+        """Mở cửa sổ bàn cờ"""
+        if self.game_window: 
+            self.game_window.destroy()
+
+        self.game_window = CaroBoard(self, opponent, my_turn, symbol, self.send_game_move)
 
 if __name__ == "__main__":
     app = ChatClient()

@@ -42,7 +42,13 @@ enum MessageType {
     MSG_FILE_END,     // Báo server: "Đã gửi xong"
     MSG_FILE_NOTIFY,
     // --- TÍNH NĂNG TẢI FILE (DOWNLOAD) ---
-    MSG_FILE_DOWNLOAD_REQ = 22  // Client gửi: "Server ơi, gửi cho tôi file này đi"     // Server báo người nhận: "Có file mới gửi đến bạn"      // 18
+    MSG_FILE_DOWNLOAD_REQ,
+
+    MSG_GAME_REQ,
+    MSG_GAME_ACCEPT,
+    MSG_GAME_MOVE,
+    MSG_GAME_END
+     // Client gửi: "Server ơi, gửi cho tôi file này đi"     // Server báo người nhận: "Có file mới gửi đến bạn"      // 18
 };
 
 // --- QUAN TRỌNG: BẮT BUỘC DÙNG #pragma pack(1) ---
