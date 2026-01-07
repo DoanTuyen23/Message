@@ -178,6 +178,11 @@ Server đóng vai trò trung chuyển, không lưu trạng thái bàn cờ.
 
 #### 1. Biên dịch Server
 Sử dụng `g++` (MinGW) hoặc Visual Studio:
-```bash
-cd Server
+
 g++ server_main.cpp storage.cpp -o Server.exe -lws2_32
+
+
+#### 2. Chạy file Server.exe 
+
+#### 3. Chạy file client_app.py
+ 
